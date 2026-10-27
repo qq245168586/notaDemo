@@ -1,0 +1,23 @@
+name: nota_hardware_simulator
+description: Minimal Flutter app that simulates the Nota recording hardware.
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.2
+  mqtt_client: ^10.5.1
+  path_provider: ^2.1.5
+  record: ^6.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

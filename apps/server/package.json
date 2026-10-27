@@ -1,0 +1,33 @@
+{
+  "name": "nota-server",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "worker": "tsx watch src/worker/main.ts",
+    "broker": "tsx watch src/broker/main.ts",
+    "dev:all": "concurrently -n web,worker,mqtt -c blue,magenta,green \"next dev\" \"tsx watch src/worker/main.ts\" \"tsx watch src/broker/main.ts\"",
+    "build": "next build",
+    "start": "next start",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@next/env": "^15.5.0",
+    "aedes": "^0.51.3",
+    "better-sqlite3": "^11.8.1",
+    "mqtt": "^5.10.4",
+    "next": "^15.5.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.13.0",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}

@@ -1,0 +1,12 @@
+.DS_Store
+**/.dart_tool/
+**/.idea/
+**/*.iml
+**/build/
+**/.flutter-plugins*
+**/node_modules/
+**/.next/
+**/.env.local
+**/data/
+artifacts/*.apk
+
