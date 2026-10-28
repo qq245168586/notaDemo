@@ -29,12 +29,22 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>用于连接本机 Nota 服务和 MQTT 消息服务。</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>将你确认的录音事项添加到系统日历，并设置提前提醒。</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>将你确认的录音事项添加到系统日历，并避免重复添加。</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>将你确认的录音待办保存到系统提醒事项。</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>将你确认的录音待办保存到系统提醒事项，并设置提醒时间。</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>UILaunchStoryboardName</key>
-	<string>LaunchScreen</string>
-	<key>UIMainStoryboardFile</key>
-	<string>Main</string>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_dartVmService._tcp</string>
+	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

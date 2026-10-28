@@ -20,7 +20,9 @@ export async function publishTaskStatus(task: RecordingTask) {
   });
 
   await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('MQTT通知超时')), 1500);
     getClient().publish(`nota/tasks/${task.id}/status`, payload, { qos: 1, retain: true }, (error) => {
+      clearTimeout(timer);
       if (error) reject(error);
       else resolve();
     });

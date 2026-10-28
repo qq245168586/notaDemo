@@ -22,21 +22,28 @@ class MqttTaskService {
     final clientId = 'nota-simulator-${DateTime.now().millisecondsSinceEpoch}';
     final client = MqttServerClient.withPort(host, clientId, port)
       ..keepAlivePeriod = 20
+      ..connectTimeoutPeriod = 3000
       ..autoReconnect = true
       ..logging(on: false)
       ..connectionMessage = MqttConnectMessage()
           .withClientIdentifier(clientId)
-          .startClean()
-          .withWillQos(MqttQos.atLeastOnce);
-
-    await client.connect();
+          .startClean();
+    client.setProtocolV311();
+    _client = client;
+    try {
+      await client.connect();
+    } catch (_) {
+      client.disconnect();
+      _client = null;
+      rethrow;
+    }
     if (client.connectionStatus?.state != MqttConnectionState.connected) {
       client.disconnect();
+      _client = null;
       throw StateError('MQTT连接失败');
     }
 
     final topic = 'nota/tasks/$taskId/status';
-    client.subscribe(topic, MqttQos.atLeastOnce);
     _subscription = client.updates?.listen((messages) {
       final payload = messages.first.payload as MqttPublishMessage;
       final text = MqttPublishPayload.bytesToStringAsString(
@@ -45,7 +52,7 @@ class MqttTaskService {
       onEvent(
           TaskStatusEvent.fromJson(jsonDecode(text) as Map<String, dynamic>));
     });
-    _client = client;
+    client.subscribe(topic, MqttQos.atLeastOnce);
   }
 
   Future<void> disconnect() async {

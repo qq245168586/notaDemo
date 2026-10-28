@@ -8,7 +8,7 @@ import { getStore, QuotaExceededError } from '@/server/store';
 export const runtime = 'nodejs';
 
 export async function GET() {
-  return NextResponse.json({ tasks: getStore().listTasks() });
+  return NextResponse.json({ tasks: await getStore().listTasks() });
 }
 
 export async function POST(request: Request) {
@@ -22,12 +22,15 @@ export async function POST(request: Request) {
   }
 
   const store = getStore();
-  const oldTask = store.findByRequestId(requestId);
+  const oldTask = await store.findByRequestId(requestId);
   if (oldTask) {
+    if (await store.isDeleted(oldTask.id)) {
+      return NextResponse.json({ error: '该录音任务已删除，请重新开始录音' }, { status: 410 });
+    }
     return NextResponse.json({
       taskId: oldTask.id,
       status: oldTask.status,
-      remainingQuota: store.getQuota().remaining,
+      remainingQuota: (await store.getQuota()).remaining,
     });
   }
 
@@ -42,12 +45,12 @@ export async function POST(request: Request) {
   await fs.writeFile(audioPath, Buffer.from(await audio.arrayBuffer()));
 
   try {
-    const task = store.createTask({ requestId, audioPath, transcriptHint });
+    const task = await store.createTask({ requestId, audioPath, transcriptHint });
     return NextResponse.json(
       {
         taskId: task.id,
         status: task.status,
-        remainingQuota: store.getQuota().remaining,
+        remainingQuota: (await store.getQuota()).remaining,
       },
       { status: 202 },
     );

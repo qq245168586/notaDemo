@@ -3,6 +3,7 @@ export const TASK_STAGES = [
   'AUDIO_PROCESSING',
   'ASR_PROCESSING',
   'TEXT_CORRECTING',
+  'TRANSCRIPT_REVIEWING',
   'AGENT_RUNNING',
   'RESULT_VALIDATING',
   'COMPLETED',
@@ -11,6 +12,13 @@ export const TASK_STAGES = [
 
 export type TaskStage = (typeof TASK_STAGES)[number];
 export type QuotaState = 'RESERVED' | 'CONSUMED' | 'RELEASED';
+
+export interface TaskProgress {
+  id: number;
+  stage: TaskStage;
+  message: string;
+  createdAt: string;
+}
 
 export interface ToolCallRecord {
   id: string;
@@ -36,6 +44,31 @@ export interface RecordingTask {
   quotaState: QuotaState;
   createdAt: string;
   updatedAt: string;
+  progress: TaskProgress[];
+  review?: TranscriptReview;
+  timeMentions?: TimeMention[];
+}
+
+export interface TranscriptReview {
+  summary: string;
+  findings: Array<{ original: string; candidate: string; decision: string; evidence: string }>;
+  source: 'text_review';
+  model: string;
+  changes?: { before: string; after: string };
+}
+
+export interface TimeMention {
+  id: string;
+  start: number;
+  end: number;
+  quote: string;
+  context: string;
+  title: string;
+  date: string | null;
+  time: string | null;
+  startAt: string | null;
+  remindBeforeMinutes: number;
+  note: string;
 }
 
 export interface QuotaSnapshot {

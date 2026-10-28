@@ -4,6 +4,10 @@ import '../state/task_store.dart';
 import '../widgets/result_section.dart';
 import '../widgets/stage_chip.dart';
 import '../widgets/tool_call_card.dart';
+import '../widgets/processing_card.dart';
+import '../widgets/system_schedule_card.dart';
+import '../widgets/annotated_transcript.dart';
+import '../widgets/transcript_review_card.dart';
 
 class TaskDetailScreen extends StatefulWidget {
   const TaskDetailScreen({
@@ -25,7 +29,15 @@ class _TaskDetailScreenState extends State<TaskDetailScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    widget.store.refreshTask(widget.taskId);
+    _loadTask();
+  }
+
+  Future<void> _loadTask() async {
+    await widget.store.refreshTask(widget.taskId);
+    final task = widget.store.taskById(widget.taskId);
+    if (mounted && task?.stage == 'COMPLETED' && task?.review == null) {
+      await widget.store.analyzeTask(widget.taskId);
+    }
   }
 
   @override
@@ -76,9 +88,18 @@ class _TaskDetailScreenState extends State<TaskDetailScreen>
                   StageChip(stage: task.stage),
                 ],
               ),
-              ResultSection(title: '原始转写', value: task.rawTranscript),
-              ResultSection(title: '校准文本', value: task.correctedTranscript),
+              AnnotatedTranscript(task: task),
+              TranscriptReviewCard(
+                  review: task.review,
+                  loading: widget.store.analyzingTasks.contains(task.id),
+                  error: widget.store.analysisErrors[task.id],
+                  onRetry: task.stage == 'COMPLETED'
+                      ? () => widget.store.analyzeTask(task.id)
+                      : null),
+              Card(child: ProcessingCard(task: task, showHistory: true)),
               ResultSection(title: 'AI 摘要', value: task.summary),
+              SystemScheduleCard(task: task),
+              ResultSection(title: '原始转写（供对照）', value: task.rawTranscript),
               ResultSection(title: '待办', value: task.todos),
               ResultSection(title: '提醒', value: task.reminders),
               if (task.toolCalls.isNotEmpty) ...[

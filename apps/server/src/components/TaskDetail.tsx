@@ -17,6 +17,18 @@ export function TaskDetail({ task }: { task?: RecordingTask }) {
         <StageBadge stage={task.status} />
       </div>
       {task.error && <p className="error">{task.error}</p>}
+      {task.review && <div className="result-block">
+        <h3>AI 校验说明</h3>
+        <p>{task.review.summary}</p>
+        <small>文本复核结论与依据摘要，不是声学置信分数。</small>
+        {task.review.findings.map((item, index) => <p key={index}>
+          {item.decision}：{item.original}{item.candidate ? `，候选：${item.candidate}` : ''}。{item.evidence}
+        </p>)}
+      </div>}
+      <div className="result-block">
+        <h3>处理过程{!['COMPLETED', 'FAILED'].includes(task.status) ? ' · 实时更新' : ''}</h3>
+        <ol>{task.progress?.map((entry) => <li key={entry.id}>{entry.message}</li>)}</ol>
+      </div>
       <ResultBlock title="ASR 原文" value={task.rawTranscript} />
       <ResultBlock title="校准文本" value={task.correctedTranscript} />
       <ResultBlock title="AI 摘要" value={task.summary} />

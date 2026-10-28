@@ -6,7 +6,9 @@
 **/.flutter-plugins*
 **/node_modules/
 **/.next/
+**/*.tsbuildinfo
 **/.env.local
 **/data/
 artifacts/*.apk
+dist-ios/
 

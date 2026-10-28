@@ -87,7 +87,9 @@ class _TaskListScreenState extends State<TaskListScreen>
                 else
                   ...widget.store.tasks.map(
                     (task) => TaskTile(
+                      key: ValueKey(task.id),
                       task: task,
+                      onDelete: () => widget.store.deleteTask(task.id),
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute<void>(
                           builder: (_) => TaskDetailScreen(

@@ -1,261 +1,160 @@
-import Database from 'better-sqlite3';
-import fs from 'node:fs';
-import path from 'node:path';
+import { MongoClient } from 'mongodb';
 import { randomUUID } from 'node:crypto';
 import { appConfig } from '@/config/ai';
 import { quotaDate } from '@/server/date';
-import type {
-  AgentResult,
-  QuotaSnapshot,
-  RecordingTask,
-  TaskStage,
-} from '@/domain/types';
+import { extractTimeMentions } from '@/server/time-mentions';
+import type { AgentResult, QuotaSnapshot, RecordingTask, TaskStage, TranscriptReview, TimeMention } from '@/domain/types';
 
+type TaskDocument = RecordingTask & { _id: string; deletedAt?: string };
+type QuotaDocument = { _id: string; used: number; reserved: number; completedRounds?: number };
 const DAILY_LIMIT = 10;
-
-type TaskRow = {
-  id: string;
-  request_id: string;
-  status: TaskStage;
-  audio_path: string;
-  transcript_hint: string | null;
-  raw_transcript: string | null;
-  corrected_transcript: string | null;
-  summary: string | null;
-  todos_json: string;
-  reminders_json: string;
-  tool_calls_json: string;
-  error: string | null;
-  quota_date: string;
-  quota_state: RecordingTask['quotaState'];
-  created_at: string;
-  updated_at: string;
-};
-
 export class QuotaExceededError extends Error {}
 
 export class TaskStore {
-  private readonly db: Database.Database;
+  readonly client: MongoClient;
+  readonly db;
+  private ready?: Promise<unknown>;
 
-  constructor(dbPath: string) {
-    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-    this.db = new Database(dbPath);
-    this.db.pragma('journal_mode = WAL');
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS tasks (
-        id TEXT PRIMARY KEY,
-        request_id TEXT NOT NULL UNIQUE,
-        status TEXT NOT NULL,
-        audio_path TEXT NOT NULL,
-        transcript_hint TEXT,
-        raw_transcript TEXT,
-        corrected_transcript TEXT,
-        summary TEXT,
-        todos_json TEXT NOT NULL DEFAULT '[]',
-        reminders_json TEXT NOT NULL DEFAULT '[]',
-        tool_calls_json TEXT NOT NULL DEFAULT '[]',
-        error TEXT,
-        quota_date TEXT NOT NULL,
-        quota_state TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS daily_quota (
-        quota_date TEXT PRIMARY KEY,
-        used INTEGER NOT NULL DEFAULT 0,
-        reserved INTEGER NOT NULL DEFAULT 0
-      );
-    `);
+  constructor(uri = appConfig.mongoUri, database = appConfig.mongoDatabase) {
+    this.client = new MongoClient(uri, { serverSelectionTimeoutMS: 5000, ignoreUndefined: true });
+    this.db = this.client.db(database);
   }
 
-  close() {
-    this.db.close();
+  private get tasks() { return this.db.collection<TaskDocument>('tasks'); }
+  private get quotas() { return this.db.collection<QuotaDocument>('daily_quota'); }
+
+  async initialize() {
+    this.ready ??= Promise.all([
+      this.tasks.createIndex({ requestId: 1 }, { unique: true }),
+      this.tasks.createIndex({ status: 1, createdAt: 1 }),
+      this.tasks.createIndex({ createdAt: -1 }),
+    ]).catch(error => { this.ready = undefined; throw error; });
+    await this.ready;
   }
 
-  private parse(row?: TaskRow): RecordingTask | undefined {
+  async close() { await this.client.close(); }
+
+  private parse(row: TaskDocument | null): RecordingTask | undefined {
     if (!row) return undefined;
-    return {
-      id: row.id,
-      requestId: row.request_id,
-      status: row.status,
-      audioPath: row.audio_path,
-      transcriptHint: row.transcript_hint ?? undefined,
-      rawTranscript: row.raw_transcript ?? undefined,
-      correctedTranscript: row.corrected_transcript ?? undefined,
-      summary: row.summary ?? undefined,
-      todos: JSON.parse(row.todos_json),
-      reminders: JSON.parse(row.reminders_json),
-      toolCalls: JSON.parse(row.tool_calls_json),
-      error: row.error ?? undefined,
-      quotaDate: row.quota_date,
-      quotaState: row.quota_state,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
+    const { _id, deletedAt, ...task } = row;
+    task.timeMentions ??= extractTimeMentions(task.correctedTranscript ?? task.rawTranscript ?? '', task.createdAt, appConfig.timezone);
+    return task;
   }
 
-  getTask(id: string) {
-    return this.parse(this.db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as TaskRow | undefined);
+  async getTask(id: string) { return this.parse(await this.tasks.findOne({ _id: id })); }
+  async findByRequestId(requestId: string) { return this.parse(await this.tasks.findOne({ requestId })); }
+  async listTasks() {
+    return (await this.tasks.find({ deletedAt: { $exists: false } }).sort({ createdAt: -1 }).toArray()).map(row => this.parse(row)!);
+  }
+  async isDeleted(id: string) {
+    return !!await this.tasks.findOne({ _id: id, deletedAt: { $exists: true } }, { projection: { _id: 1 } });
+  }
+  async deleteTask(id: string) {
+    // Soft deletion keeps in-flight settlement and request deduplication safe.
+    await this.tasks.updateOne({ _id: id, deletedAt: { $exists: false } }, { $set: { deletedAt: new Date().toISOString() } });
+    await this.db.collection('recording_vectors').deleteOne({ taskId: id });
   }
 
-  findByRequestId(requestId: string) {
-    return this.parse(
-      this.db.prepare('SELECT * FROM tasks WHERE request_id = ?').get(requestId) as TaskRow | undefined,
-    );
+  private async ensureQuota(day: string) {
+    try {
+      await this.quotas.updateOne({ _id: day }, { $setOnInsert: { used: 0, reserved: 0 } }, { upsert: true });
+    } catch (error) { if ((error as { code?: number }).code !== 11000) throw error; }
+    await this.quotas.updateOne({ _id: day, used: { $gte: DAILY_LIMIT }, reserved: 0 },
+      { $set: { used: 0 }, $inc: { completedRounds: 1 } });
+  }
+  async getQuota(day = quotaDate()): Promise<QuotaSnapshot> {
+    await this.ensureQuota(day);
+    const row = (await this.quotas.findOne({ _id: day }))!;
+    return { limit: DAILY_LIMIT, used: row.used, reserved: row.reserved, remaining: Math.max(0, DAILY_LIMIT - row.used - row.reserved) };
   }
 
-  listTasks() {
-    return (this.db.prepare('SELECT * FROM tasks ORDER BY created_at DESC').all() as TaskRow[]).map(
-      (row) => this.parse(row)!,
-    );
-  }
-
-  getQuota(day = quotaDate()): QuotaSnapshot {
-    this.db
-      .prepare('INSERT OR IGNORE INTO daily_quota(quota_date, used, reserved) VALUES (?, 0, 0)')
-      .run(day);
-    const row = this.db
-      .prepare('SELECT used, reserved FROM daily_quota WHERE quota_date = ?')
-      .get(day) as { used: number; reserved: number };
-    return {
-      limit: DAILY_LIMIT,
-      used: row.used,
-      reserved: row.reserved,
-      remaining: Math.max(0, DAILY_LIMIT - row.used - row.reserved),
-    };
-  }
-
-  createTask(input: {
-    id?: string;
-    requestId: string;
-    audioPath: string;
-    transcriptHint?: string;
-  }) {
-    return this.db.transaction(() => {
-      const existing = this.findByRequestId(input.requestId);
-      if (existing) return existing;
-
-      const day = quotaDate();
-      const quota = this.getQuota(day);
-      if (quota.used + quota.reserved >= DAILY_LIMIT) {
-        throw new QuotaExceededError('今日免费次数已用完');
-      }
-
-      const now = new Date().toISOString();
-      const id = input.id ?? randomUUID();
-      this.db
-        .prepare('UPDATE daily_quota SET reserved = reserved + 1 WHERE quota_date = ?')
-        .run(day);
-      this.db
-        .prepare(`
-          INSERT INTO tasks(
-            id, request_id, status, audio_path, transcript_hint,
-            quota_date, quota_state, created_at, updated_at
-          ) VALUES (?, ?, 'PENDING', ?, ?, ?, 'RESERVED', ?, ?)
-        `)
-        .run(id, input.requestId, input.audioPath, input.transcriptHint ?? null, day, now, now);
-      return this.getTask(id)!;
-    })();
-  }
-
-  claimNextTask() {
-    return this.db.transaction(() => {
-      const row = this.db
-        .prepare("SELECT * FROM tasks WHERE status = 'PENDING' ORDER BY created_at LIMIT 1")
-        .get() as TaskRow | undefined;
-      if (!row) return undefined;
-      const now = new Date().toISOString();
-      this.db
-        .prepare("UPDATE tasks SET status = 'AUDIO_PROCESSING', updated_at = ? WHERE id = ?")
-        .run(now, row.id);
-      return this.getTask(row.id);
-    })();
-  }
-
-  updateStage(id: string, status: TaskStage, fields: Partial<RecordingTask> = {}) {
-    this.db
-      .prepare(`
-        UPDATE tasks SET status = ?, raw_transcript = COALESCE(?, raw_transcript),
-          corrected_transcript = COALESCE(?, corrected_transcript), updated_at = ?
-        WHERE id = ?
-      `)
-      .run(
-        status,
-        fields.rawTranscript ?? null,
-        fields.correctedTranscript ?? null,
-        new Date().toISOString(),
-        id,
-      );
-    return this.getTask(id)!;
-  }
-
-  completeTask(id: string, result: AgentResult) {
-    return this.db.transaction(() => {
-      const task = this.getTask(id);
-      if (!task) throw new Error('任务不存在');
-      if (task.quotaState !== 'RESERVED') return task;
-
-      this.db
-        .prepare(
-          'UPDATE daily_quota SET reserved = reserved - 1, used = used + 1 WHERE quota_date = ?',
-        )
-        .run(task.quotaDate);
-      this.db
-        .prepare(`
-          UPDATE tasks SET status = 'COMPLETED', summary = ?, todos_json = ?, reminders_json = ?,
-            tool_calls_json = ?, quota_state = 'CONSUMED', updated_at = ? WHERE id = ?
-        `)
-        .run(
-          result.summary,
-          JSON.stringify(result.todos),
-          JSON.stringify(result.reminders),
-          JSON.stringify(result.toolCalls),
-          new Date().toISOString(),
-          id,
+  async createTask(input: { id?: string; requestId: string; audioPath: string; transcriptHint?: string }) {
+    await this.initialize();
+    const day = quotaDate();
+    await this.ensureQuota(day);
+    const session = this.client.startSession();
+    try {
+      return (await session.withTransaction(async () => {
+        const existing = await this.tasks.findOne({ requestId: input.requestId }, { session });
+        if (existing) return this.parse(existing)!;
+        const quota = await this.quotas.findOneAndUpdate(
+          { _id: day, $expr: { $lt: [{ $add: ['$used', '$reserved'] }, DAILY_LIMIT] } },
+          { $inc: { reserved: 1 } }, { session, returnDocument: 'after' },
         );
-      return this.getTask(id)!;
-    })();
-  }
-
-  failTask(id: string, message: string) {
-    return this.db.transaction(() => {
-      const task = this.getTask(id);
-      if (!task) throw new Error('任务不存在');
-      if (task.quotaState === 'RESERVED') {
-        this.db
-          .prepare('UPDATE daily_quota SET reserved = reserved - 1 WHERE quota_date = ?')
-          .run(task.quotaDate);
+        if (!quota) throw new QuotaExceededError('本轮次数已全部预占，请等正在处理的任务完成后重试');
+        const now = new Date().toISOString();
+        const id = input.id ?? randomUUID();
+        const task: TaskDocument = { ...input, id, _id: id, status: 'PENDING', quotaDate: day,
+          quotaState: 'RESERVED', todos: [], reminders: [], toolCalls: [], progress: [], createdAt: now, updatedAt: now };
+        await this.tasks.insertOne(task, { session });
+        return this.parse(task)!;
+      }))!;
+    } catch (error) {
+      // Two simultaneous retries may race on the unique requestId index.
+      if ((error as { code?: number }).code === 11000) {
+        const existing = await this.findByRequestId(input.requestId);
+        if (existing) return existing;
       }
-      this.db
-        .prepare(`
-          UPDATE tasks SET status = 'FAILED', error = ?, quota_state = 'RELEASED', updated_at = ?
-          WHERE id = ?
-        `)
-        .run(message, new Date().toISOString(), id);
-      return this.getTask(id)!;
-    })();
+      throw error;
+    } finally { await session.endSession(); }
   }
 
-  searchHistory(query: string) {
-    const pattern = `%${query.replaceAll('%', '')}%`;
-    return (
-      this.db
-        .prepare(`
-          SELECT * FROM tasks
-          WHERE status = 'COMPLETED' AND (corrected_transcript LIKE ? OR summary LIKE ?)
-          ORDER BY created_at DESC LIMIT 5
-        `)
-        .all(pattern, pattern) as TaskRow[]
-    ).map((row) => this.parse(row)!);
+  async claimNextTask() {
+    return this.parse(await this.tasks.findOneAndUpdate({ status: 'PENDING' },
+      { $set: { status: 'AUDIO_PROCESSING', updatedAt: new Date().toISOString() } },
+      { sort: { createdAt: 1 }, returnDocument: 'after' }));
+  }
+  async updatePreview(id: string, fields: Partial<RecordingTask>) {
+    return this.parse(await this.tasks.findOneAndUpdate({ _id: id },
+      { $set: { ...fields, updatedAt: new Date().toISOString() } }, { returnDocument: 'after' }))!;
+  }
+  async addProgress(id: string, stage: TaskStage, message: string) {
+    await this.tasks.updateOne({ _id: id }, { $push: { progress: { id: Date.now(), stage, message, createdAt: new Date().toISOString() } } });
+  }
+  async updateStage(id: string, status: TaskStage, fields: Partial<RecordingTask> = {}) {
+    await this.updatePreview(id, { ...fields, status });
+    const labels: Record<string, string> = {
+      ASR_PROCESSING: '正在识别语音，转写文字会逐步出现', TEXT_CORRECTING: '正在根据上下文校准转写',
+      TRANSCRIPT_REVIEWING: '正在核对同音词、专有名词和时间，生成校验说明',
+      AGENT_RUNNING: '正在整理摘要并选择工具', RESULT_VALIDATING: '正在核验结果与额度',
+    };
+    await this.addProgress(id, status, labels[status] ?? status);
+    return (await this.getTask(id))!;
+  }
+  async saveAnalysis(id: string, review: TranscriptReview, timeMentions: TimeMention[]) {
+    return this.updatePreview(id, { review, timeMentions });
+  }
+
+  private async settleTask(id: string, success: boolean, fields: Partial<RecordingTask>) {
+    const session = this.client.startSession();
+    try {
+      return (await session.withTransaction(async () => {
+        const task = await this.tasks.findOne({ _id: id }, { session });
+        if (!task) throw new Error('任务不存在');
+        if (task.quotaState !== 'RESERVED') return this.parse(task)!;
+        await this.quotas.updateOne({ _id: task.quotaDate },
+          { $inc: { reserved: -1, used: success ? 1 : 0 } }, { session });
+        await this.quotas.updateOne({ _id: task.quotaDate, used: { $gte: DAILY_LIMIT }, reserved: 0 },
+          { $set: { used: 0 }, $inc: { completedRounds: 1 } }, { session });
+        const updated = await this.tasks.findOneAndUpdate({ _id: id }, { $set: { ...fields,
+          status: success ? 'COMPLETED' : 'FAILED', quotaState: success ? 'CONSUMED' : 'RELEASED', updatedAt: new Date().toISOString() } },
+          { session, returnDocument: 'after' });
+        return this.parse(updated)!;
+      }))!;
+    } finally { await session.endSession(); }
+  }
+  async completeTask(id: string, result: AgentResult) { return this.settleTask(id, true, result); }
+  async failTask(id: string, message: string) { return this.settleTask(id, false, { error: message }); }
+
+  async searchHistory(query: string) {
+    const terms = query.trim().match(/[\p{L}\p{N}]+/gu) ?? [];
+    if (!terms.length) return [];
+    const escaped = terms.join(' ').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return (await this.tasks.find({ status: 'COMPLETED', deletedAt: { $exists: false },
+      $or: [{ correctedTranscript: { $regex: escaped, $options: 'i' } }, { summary: { $regex: escaped, $options: 'i' } }] })
+      .sort({ createdAt: -1 }).limit(5).toArray()).map(row => this.parse(row)!);
   }
 }
 
-const globalForStore = globalThis as unknown as { notaTaskStore?: TaskStore };
-
-export function getStore() {
-  if (!globalForStore.notaTaskStore) {
-    globalForStore.notaTaskStore = new TaskStore(path.join(appConfig.dataDir, 'nota.sqlite'));
-  }
-  return globalForStore.notaTaskStore;
-}
+const globalForStore = globalThis as unknown as { notaMongoStore?: TaskStore };
+export function getStore() { return globalForStore.notaMongoStore ??= new TaskStore(); }

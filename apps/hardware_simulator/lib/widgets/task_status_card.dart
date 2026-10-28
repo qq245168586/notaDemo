@@ -34,7 +34,7 @@ class TaskStatusCard extends StatelessWidget {
             ],
             if (remainingQuota != null) ...[
               const SizedBox(height: 8),
-              Text('今日剩余：$remainingQuota 次'),
+              Text('本轮剩余：$remainingQuota 次'),
             ],
             if (summary != null) ...[
               const Divider(height: 28),

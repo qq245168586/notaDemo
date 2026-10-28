@@ -30,6 +30,9 @@ class SimulatorController extends ChangeNotifier {
   final AudioRecorderService _recorder;
   final TaskApiService _api;
   final MqttTaskService _mqtt;
+  Timer? _poller;
+  bool _refreshing = false;
+  bool _disposed = false;
 
   bool isRecording = false;
   bool isBusy = false;
@@ -74,7 +77,13 @@ class SimulatorController extends ChangeNotifier {
       stage = created.status;
       notifyListeners();
 
-      await _mqtt.subscribe(taskId: created.taskId, onEvent: _onStatus);
+      // 上传已成功；MQTT 只是通知，连接失败不能把后台任务标记为失败。
+      _poller = Timer.periodic(const Duration(seconds: 2), (_) {
+        unawaited(_refreshResult().catchError((_) {}));
+      });
+      unawaited(_mqtt
+          .subscribe(taskId: created.taskId, onEvent: _onStatus)
+          .catchError((_) {}));
       await _refreshResult();
     } catch (exception) {
       isRecording = false;
@@ -86,22 +95,27 @@ class SimulatorController extends ChangeNotifier {
   }
 
   Future<void> _onStatus(TaskStatusEvent event) async {
-    if (event.taskId != taskId) return;
-    stage = event.stage;
-    notifyListeners();
-    if (stage == 'COMPLETED' || stage == 'FAILED') {
-      await _refreshResult();
-    }
+    if (_disposed || event.taskId != taskId) return;
+    // MQTT 只提醒刷新，数据库里的状态才是最终结果。
+    await _refreshResult().catchError((_) {});
   }
 
   Future<void> _refreshResult() async {
-    if (taskId == null) return;
-    final task = await _api.getTask(taskId!);
-    stage = task.stage;
-    summary = task.summary;
-    error = task.error;
-    isBusy = !task.isCompleted && !task.isFailed;
-    notifyListeners();
+    final currentId = taskId;
+    if (currentId == null || _refreshing || _disposed) return;
+    _refreshing = true;
+    try {
+      final task = await _api.getTask(currentId);
+      if (_disposed || taskId != currentId) return;
+      stage = task.stage;
+      summary = task.summary;
+      error = task.error;
+      isBusy = !task.isCompleted && !task.isFailed;
+      if (!isBusy) _poller?.cancel();
+      notifyListeners();
+    } finally {
+      _refreshing = false;
+    }
   }
 
   Future<void> reset() async {
@@ -111,6 +125,7 @@ class SimulatorController extends ChangeNotifier {
   }
 
   void _clearResult() {
+    _poller?.cancel();
     isRecording = false;
     isBusy = false;
     stage = 'READY';
@@ -127,6 +142,8 @@ class SimulatorController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _poller?.cancel();
     unawaited(_mqtt.disconnect());
     unawaited(_recorder.dispose());
     super.dispose();

@@ -35,6 +35,17 @@ class ApiClient {
     return Quota.fromJson(_decode(response));
   }
 
+  Future<void> deleteTask(String taskId) async {
+    _decode(await http.delete(Uri.parse('$baseUrl/api/tasks/$taskId')));
+  }
+
+  Future<RecordingTask> analyzeTask(String taskId) async {
+    final response =
+        await http.post(Uri.parse('$baseUrl/api/tasks/$taskId/analyze'));
+    return RecordingTask.fromJson(
+        Map<String, dynamic>.from(_decode(response)['task'] as Map));
+  }
+
   Future<String> queryHistory(String question) async {
     final response = await http.post(
       Uri.parse('$baseUrl/api/agent/query'),
@@ -52,6 +63,7 @@ class ApiClient {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw ApiException(
         decoded['error']?.toString() ?? 'HTTP ${response.statusCode}',
+        statusCode: response.statusCode,
       );
     }
     return decoded;
@@ -59,8 +71,9 @@ class ApiClient {
 }
 
 class ApiException implements Exception {
-  const ApiException(this.message);
+  const ApiException(this.message, {this.statusCode});
   final String message;
+  final int? statusCode;
 
   @override
   String toString() => message;

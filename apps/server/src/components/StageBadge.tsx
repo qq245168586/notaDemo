@@ -5,6 +5,7 @@ const labels: Record<TaskStage, string> = {
   AUDIO_PROCESSING: '音频处理',
   ASR_PROCESSING: 'ASR 转写',
   TEXT_CORRECTING: '文本校准',
+  TRANSCRIPT_REVIEWING: '可信度与疑词校验',
   AGENT_RUNNING: 'Agent 执行',
   RESULT_VALIDATING: '结果验证',
   COMPLETED: '已完成',

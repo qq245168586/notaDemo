@@ -37,7 +37,7 @@ class _SimulatorScreenState extends State<SimulatorScreen> {
             return ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                const Text('录一段语音，模拟硬件上传到 Nota 服务端。'),
+                const Text('默认测试账号 · 无需登录，录音后可在用户端和网页查看结果。'),
                 const SizedBox(height: 16),
                 RecordCard(
                   isRecording: controller.isRecording,

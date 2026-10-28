@@ -27,14 +27,16 @@ class MqttService {
       return;
     }
 
-    final client = MqttServerClient(
-      host,
-      'nota-mobile-${DateTime.now().millisecondsSinceEpoch}',
-    )
+    final clientId = 'nota-mobile-${DateTime.now().millisecondsSinceEpoch}';
+    final client = MqttServerClient(host, clientId)
       ..port = port
       ..keepAlivePeriod = 20
+      ..connectTimeoutPeriod = 3000
+      ..autoReconnect = true
       ..logging(on: false)
-      ..connectionMessage = MqttConnectMessage().startClean();
+      ..connectionMessage =
+          MqttConnectMessage().withClientIdentifier(clientId).startClean();
+    client.setProtocolV311();
 
     try {
       await client.connect();

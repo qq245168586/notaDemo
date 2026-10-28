@@ -3,12 +3,12 @@ class AppConfig {
 
   static const apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.0.2.2:3000',
+    defaultValue: 'http://127.0.0.1:3000',
   );
 
   static const mqttHost = String.fromEnvironment(
     'MQTT_HOST',
-    defaultValue: '10.0.2.2',
+    defaultValue: '127.0.0.1',
   );
 
   static const mqttPort = int.fromEnvironment(

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'processing_card.dart';
 
 class StageChip extends StatelessWidget {
   const StageChip({super.key, required this.stage});
@@ -13,7 +14,7 @@ class StageChip extends StatelessWidget {
       _ => Colors.blue,
     };
     return Chip(
-      label: Text(stage.replaceAll('_', ' ')),
+      label: Text(processingStages[stage] ?? stage),
       side: BorderSide(color: color.withValues(alpha: 0.35)),
       backgroundColor: color.withValues(alpha: 0.1),
       visualDensity: VisualDensity.compact,

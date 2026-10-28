@@ -9,12 +9,16 @@
     "dev:all": "concurrently -n web,worker,mqtt -c blue,magenta,green \"next dev\" \"tsx watch src/worker/main.ts\" \"tsx watch src/broker/main.ts\"",
     "build": "next build",
     "start": "next start",
-    "test": "vitest run"
+    "test": "vitest run",
+    "mongo:start": "tsx scripts/start-mongo.ts",
+    "db:migrate": "tsx scripts/migrate-mongo.ts",
+    "history:index": "tsx scripts/index-history.ts"
   },
   "dependencies": {
     "@next/env": "^15.5.0",
     "aedes": "^0.51.3",
     "better-sqlite3": "^11.8.1",
+    "mongodb": "^6.21.0",
     "mqtt": "^5.10.4",
     "next": "^15.5.0",
     "react": "^19.1.0",

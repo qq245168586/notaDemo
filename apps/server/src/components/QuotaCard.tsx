@@ -4,7 +4,7 @@ export function QuotaCard({ quota }: { quota?: QuotaSnapshot }) {
   return (
     <section className="card quota-card">
       <div>
-        <p className="label">FREE 今日额度</p>
+        <p className="label">本轮额度 · 10 次后重置</p>
         <strong>{quota ? `${quota.remaining} / ${quota.limit}` : '--'}</strong>
       </div>
       <div className="quota-meta">

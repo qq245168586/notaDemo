@@ -21,7 +21,7 @@ class QuotaCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('今日免费额度',
+                  Text('本轮额度（10 次后重置）',
                       style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 4),
                   Text(current == null

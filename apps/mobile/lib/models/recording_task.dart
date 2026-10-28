@@ -28,6 +28,10 @@ class RecordingTask {
     this.reminders = const [],
     this.toolCalls = const [],
     this.error,
+    this.progress = const [],
+    this.updatedAt,
+    this.review,
+    this.timeMentions = const [],
   });
 
   final String id;
@@ -40,6 +44,10 @@ class RecordingTask {
   final List<Object?> reminders;
   final List<ToolCallRecord> toolCalls;
   final String? error;
+  final List<Map<String, dynamic>> progress;
+  final DateTime? updatedAt;
+  final Map<String, dynamic>? review;
+  final List<Map<String, dynamic>> timeMentions;
 
   bool get isFinished => stage == 'COMPLETED' || stage == 'FAILED';
 
@@ -62,6 +70,16 @@ class RecordingTask {
               ))
           .toList(),
       error: json['error']?.toString(),
+      review: json['review'] is Map
+          ? Map<String, dynamic>.from(json['review'] as Map)
+          : null,
+      timeMentions: (json['timeMentions'] as List<dynamic>? ?? [])
+          .map((item) => Map<String, dynamic>.from(item as Map))
+          .toList(),
+      updatedAt: DateTime.tryParse((json['updatedAt'] ?? '').toString()),
+      progress: (json['progress'] as List<dynamic>? ?? [])
+          .map((item) => Map<String, dynamic>.from(item as Map))
+          .toList(),
     );
   }
 }
